@@ -1,21 +1,13 @@
 #include "organizercore.h"
 
-#include "delayedfilewriter.h"                     // for DelayedFileWriter, etc
-#include "guessedvalue.h"                          // for GuessedValue, etc
 #include "imodinterface.h"
-#include "imoinfo.h"                               // For IOrganizer
 #include "iplugingame.h"
 #include "iuserinterface.h"
 #include "loadmechanism.h"
 #include "messagedialog.h"
 #include "modlistsortproxy.h"
-#include "modrepositoryfileinfo.h"
-#include "nexusinterface.h"                        // for NexusInterface, etc
 #include "plugincontainer.h"
 #include "pluginlistsortproxy.h"
-#include "profile.h"                               // for Profile
-#include "versioninfo.h"                           // for VersionInfo
-
 #include "logbuffer.h"
 #include "credentialsdialog.h"
 #include "filedialogmemory.h"
@@ -34,42 +26,22 @@
 #include <questionboxmemory.h>
 
 #include <QApplication>
-#include <QByteArray>                              // for QByteArray
-#include <QCoreApplication>                        // for QCoreApplication
-#include <QDialog>                                 // for QDialog, etc
 #include <QDialogButtonBox>
-#include <QFile>                                   // for QFile
-#include <QFileInfo>                               // for QFileInfo
-#include <QIODevice>                               // for QIODevice, etc
 #include <QMessageBox>
 #include <QNetworkInterface>
-#include <QNetworkReply>                           // for QNetworkReply
 #include <QProcess>
-#include <QRegExp>                                 // for QRegExp
-#include <QSharedPointer>                          // for QSharedPointer
 #include <QTimer>
-#include <QUrl>                                    // for QUrl
 #include <QWidget>
 
 #include <QtDebug>
-#include <QtGlobal>                                // for qPrintable, etc
 
 #include <Psapi.h>
-#include <tchar.h>                                 // for _tcsicmp
 
 #include <exception>
 #include <functional>
-#include <limits.h>                                // for UINT_MAX, etc
 #include <memory>
 #include <set>
-#include <stddef.h>                                // for size_t
-#include <stdexcept>                               // for runtime_error
-#include <string>                                  // for wstring
-#include <string.h>                                // for memset, wcsrchr
-#include <tuple>                                   // for tuple
 #include <utility>
-
-namespace MOBase { class IModRepositoryBridge; }
 
 
 using namespace MOShared;
@@ -276,8 +248,8 @@ QSettings::Status OrganizerCore::storeSettings(const QString &fileName)
       settings.setValue("binary", item.m_BinaryInfo.absoluteFilePath());
       settings.setValue("arguments", item.m_Arguments);
       settings.setValue("workingDirectory", item.m_WorkingDirectory);
+      settings.setValue("closeOnStart", item.m_CloseMO == ExecutableInfo::CloseMOStyle::DEFAULT_CLOSE);
       settings.setValue("steamAppID", item.m_SteamAppID);
-      settings.setValue("launcher", item.canLaunchGame());
     }
   }
   settings.endArray();
@@ -376,27 +348,22 @@ void OrganizerCore::updateExecutablesList(QSettings &settings)
   int numCustomExecutables = settings.beginReadArray("customExecutables");
   for (int i = 0; i < numCustomExecutables; ++i) {
     settings.setArrayIndex(i);
+    ExecutableInfo::CloseMOStyle closeMO =
+        settings.value("closeOnStart").toBool() ? ExecutableInfo::CloseMOStyle::DEFAULT_CLOSE
+                                                : ExecutableInfo::CloseMOStyle::DEFAULT_STAY;
+
     Executable::Flags flags;
-    Executable::Flags mask(Executable::AllFlags);
-    //There appears to be a certain lack of boundary between ExecutablesList and
-    //OrganizerCore concerned with who controls what when updating customised
-    //executables.
-    if (settings.value("custom", true).toBool()) {
-      flags |= Executable::CustomExecutable;
-      if (settings.value("launcher", false).toBool()) flags |= Executable::CanLaunchGame;
-    } else {
-      mask &= ~Executable::CanLaunchGame;
-    }
+    if (settings.value("custom", true).toBool())   flags |= Executable::CustomExecutable;
     if (settings.value("toolbar", false).toBool()) flags |= Executable::ShowInToolbar;
     if (settings.value("ownicon", false).toBool()) flags |= Executable::UseApplicationIcon;
 
-    m_ExecutablesList.updateExecutable(settings.value("title").toString(),
-                                       settings.value("binary").toString(),
-                                       settings.value("arguments").toString(),
-                                       settings.value("workingDirectory", "").toString(),
-                                       settings.value("steamAppID", "").toString(),
-                                       mask,
-                                       flags);
+    m_ExecutablesList.addExecutable(settings.value("title").toString(),
+                                    settings.value("binary").toString(),
+                                    settings.value("arguments").toString(),
+                                    settings.value("workingDirectory", "").toString(),
+                                    closeMO,
+                                    settings.value("steamAppID", "").toString(),
+                                    flags);
   }
 
   settings.endArray();
@@ -587,11 +554,6 @@ void OrganizerCore::createDefaultProfile()
   if (QDir(profilesPath).entryList(QDir::AllDirs | QDir::NoDotAndDotDot).size() == 0) {
     Profile newProf("Default", managedGame(), false);
   }
-}
-
-Executable const &OrganizerCore::findExecutableFromBinary(QString const &app) const
-{
-  return m_ExecutablesList.findByBinary(QFileInfo(app));
 }
 
 void OrganizerCore::setCurrentProfile(const QString &profileName)
@@ -928,84 +890,88 @@ QStringList OrganizerCore::modsSortedByProfilePriority() const
   return res;
 }
 
-void OrganizerCore::spawnBinary(const QFileInfo &binary, const QString &arguments, const QDir &currentDirectory, const QString &steamAppID, Login login)
+void OrganizerCore::spawnBinary(const QFileInfo &binary, const QString &arguments, const QDir &currentDirectory, bool closeAfterStart, const QString &steamAppID)
 {
   LockedDialog *dialog = new LockedDialog(qApp->activeWindow());
   dialog->show();
   ON_BLOCK_EXIT([&] () { dialog->hide(); dialog->deleteLater(); });
 
-  HANDLE processHandle = spawnBinaryDirect(binary, arguments, m_CurrentProfile->name(), currentDirectory, steamAppID, login);
+  HANDLE processHandle = spawnBinaryDirect(binary, arguments, m_CurrentProfile->name(), currentDirectory, steamAppID);
   if (processHandle != INVALID_HANDLE_VALUE) {
-    if (m_UserInterface != nullptr) {
-      m_UserInterface->setWindowEnabled(false);
-    }
-    // re-enable the locked dialog because what'd be the point otherwise?
-    dialog->setEnabled(true);
+    if (closeAfterStart && (m_UserInterface != nullptr)) {
+      m_UserInterface->closeWindow();
+    } else {
+      if (m_UserInterface != nullptr) {
+        m_UserInterface->setWindowEnabled(false);
+      }
+      // re-enable the locked dialog because what'd be the point otherwise?
+      dialog->setEnabled(true);
 
-    QCoreApplication::processEvents();
+      QCoreApplication::processEvents();
 
-    DWORD processExitCode;
-    DWORD retLen;
-    JOBOBJECT_BASIC_PROCESS_ID_LIST info;
+      DWORD processExitCode;
+      DWORD retLen;
+      JOBOBJECT_BASIC_PROCESS_ID_LIST info;
 
-    {
-      DWORD currentProcess = 0UL;
-      bool isJobHandle = true;
+      {
+        DWORD currentProcess = 0UL;
+        bool isJobHandle = true;
 
-      DWORD res = ::MsgWaitForMultipleObjects(1, &processHandle, false, 1000, QS_KEY | QS_MOUSE);
-      while ((res != WAIT_FAILED) && (res != WAIT_OBJECT_0) && !dialog->unlockClicked()) {
-        if (isJobHandle) {
-          if (::QueryInformationJobObject(processHandle, JobObjectBasicProcessIdList, &info, sizeof(info), &retLen) > 0) {
-            if (info.NumberOfProcessIdsInList == 0) {
-              break;
+        DWORD res = ::MsgWaitForMultipleObjects(1, &processHandle, false, 1000, QS_KEY | QS_MOUSE);
+        while ((res != WAIT_FAILED) && (res != WAIT_OBJECT_0) && !dialog->unlockClicked()) {
+          if (isJobHandle) {
+            if (::QueryInformationJobObject(processHandle, JobObjectBasicProcessIdList, &info, sizeof(info), &retLen) > 0) {
+              if (info.NumberOfProcessIdsInList == 0) {
+                break;
+              } else {
+                if (info.ProcessIdList[0] != currentProcess) {
+                  currentProcess = info.ProcessIdList[0];
+                  dialog->setProcessName(ToQString(getProcessName(currentProcess)));
+                }
+              }
             } else {
-              if (info.ProcessIdList[0] != currentProcess) {
-                currentProcess = info.ProcessIdList[0];
-                dialog->setProcessName(ToQString(getProcessName(currentProcess)));
+              // the info-object I passed only provides space for 1 process id. but since this code only cares about whether there
+              // is more than one that's good enough. ERROR_MORE_DATA simply signals there are at least two processes running.
+              // any other error probably means the handle is a regular process handle, probably caused by running MO in a job without
+              // the right to break out.
+              if (::GetLastError() != ERROR_MORE_DATA) {
+                isJobHandle = false;
               }
             }
-          } else {
-            // the info-object I passed only provides space for 1 process id. but since this code only cares about whether there
-            // is more than one that's good enough. ERROR_MORE_DATA simply signals there are at least two processes running.
-            // any other error probably means the handle is a regular process handle, probably caused by running MO in a job without
-            // the right to break out.
-            if (::GetLastError() != ERROR_MORE_DATA) {
-              isJobHandle = false;
-            }
           }
+
+          // keep processing events so the app doesn't appear dead
+          QCoreApplication::processEvents();
+
+          res = ::MsgWaitForMultipleObjects(1, &processHandle, false, 1000, QS_KEY | QS_MOUSE);
         }
-
-        // keep processing events so the app doesn't appear dead
-        QCoreApplication::processEvents();
-
-        res = ::MsgWaitForMultipleObjects(1, &processHandle, false, 1000, QS_KEY | QS_MOUSE);
+        ::GetExitCodeProcess(processHandle, &processExitCode);
       }
-      ::GetExitCodeProcess(processHandle, &processExitCode);
-    }
-    ::CloseHandle(processHandle);
+      ::CloseHandle(processHandle);
 
-    if (m_UserInterface != nullptr) {
-      m_UserInterface->setWindowEnabled(true);
-    }
-    refreshDirectoryStructure();
-    // need to remove our stored load order because it may be outdated if a foreign tool changed the
-    // file time. After removing that file, refreshESPList will use the file time as the order
-    if (managedGame()->loadOrderMechanism() == IPluginGame::LoadOrderMechanism::FileTime) {
-      qDebug("removing loadorder.txt");
-      QFile::remove(m_CurrentProfile->getLoadOrderFileName());
-    }
-    refreshESPList();
-    if (managedGame()->loadOrderMechanism() == IPluginGame::LoadOrderMechanism::FileTime) {
-      // the load order should have been retrieved from file time, now save it to our own format
-      savePluginList();
-    }
+      if (m_UserInterface != nullptr) {
+        m_UserInterface->setWindowEnabled(true);
+      }
+      refreshDirectoryStructure();
+      // need to remove our stored load order because it may be outdated if a foreign tool changed the
+      // file time. After removing that file, refreshESPList will use the file time as the order
+      if (managedGame()->loadOrderMechanism() == IPluginGame::LoadOrderMechanism::FileTime) {
+        qDebug("removing loadorder.txt");
+        QFile::remove(m_CurrentProfile->getLoadOrderFileName());
+      }
+      refreshESPList();
+      if (managedGame()->loadOrderMechanism() == IPluginGame::LoadOrderMechanism::FileTime) {
+        // the load order should have been retrieved from file time, now save it to our own format
+        savePluginList();
+      }
 
-    m_FinishedRun(binary.absoluteFilePath(), processExitCode);
+      m_FinishedRun(binary.absoluteFilePath(), processExitCode);
+    }
   }
 }
 
 HANDLE OrganizerCore::spawnBinaryDirect(const QFileInfo &binary, const QString &arguments, const QString &profileName,
-                                        const QDir &currentDirectory, const QString &steamAppID, Login login)
+                                        const QDir &currentDirectory, const QString &steamAppID)
 {
   prepareStart();
 
@@ -1014,32 +980,28 @@ HANDLE OrganizerCore::spawnBinaryDirect(const QFileInfo &binary, const QString &
     return INVALID_HANDLE_VALUE;
   }
 
-  if (steamAppID.isEmpty()) {
-    ::SetEnvironmentVariableW(L"SteamAPPId", ToWString(m_Settings.getSteamAppID()).c_str());
-  } else {
+  if (!steamAppID.isEmpty()) {
     ::SetEnvironmentVariableW(L"SteamAPPId", ToWString(steamAppID).c_str());
-    login = Login::Required;
+  } else {
+    ::SetEnvironmentVariableW(L"SteamAPPId", ToWString(m_Settings.getSteamAppID()).c_str());
   }
 
 
-  //This could possibly be made into a plugin for steam and register with onABoutToBeRun,
-  //but that's probably for when we have more than one provider of game registration.
-  if (login == Login::Required) {
-    //This isn't right for (e.g.) origin games...
-    if (QFileInfo(managedGame()->gameDirectory().absoluteFilePath("steam_api.dll")).exists()
-        && (m_Settings.getLoadMechanism() == LoadMechanism::LOAD_MODORGANIZER)) {
-      if (!testForSteam()) {
-        QWidget *window = qApp->activeWindow();
-        if ((window != nullptr) && (!window->isVisible())) {
-          window = nullptr;
-        }
-        if (QuestionBoxMemory::query(window, "steamQuery",
-              tr("Start Steam?"),
-              tr("Steam is required to be running already to correctly start the game. "
-                 "Should MO try to start steam now?"),
-              QDialogButtonBox::Yes | QDialogButtonBox::No) == QDialogButtonBox::Yes) {
-          startSteam(qApp->activeWindow());
-        }
+  //This could possibly be extracted somewhere else but it's probably for when
+  //we have more than one provider of game registration.
+  if (QFileInfo(managedGame()->gameDirectory().absoluteFilePath("steam_api.dll")).exists()
+      && (m_Settings.getLoadMechanism() == LoadMechanism::LOAD_MODORGANIZER)) {
+    if (!testForSteam()) {
+      QWidget *window = qApp->activeWindow();
+      if ((window != nullptr) && (!window->isVisible())) {
+        window = nullptr;
+      }
+      if (QuestionBoxMemory::query(window, "steamQuery",
+            tr("Start Steam?"),
+            tr("Steam is required to be running already to correctly start the game. "
+               "Should MO try to start steam now?"),
+            QDialogButtonBox::Yes | QDialogButtonBox::No) == QDialogButtonBox::Yes) {
+        startSteam(qApp->activeWindow());
       }
     }
   }
@@ -1077,10 +1039,6 @@ HANDLE OrganizerCore::startApplication(const QString &executable, const QStringL
     }
   }
   QString steamAppID;
-  //Not entirely clear what it means if we're passed a binary we don't recognise.
-  //For now I'm assuming that means we're not running a game executable and
-  //don't need to log in.
-  Login login = Login::Not_Required;
   if (executable.contains('\\') || executable.contains('/')) {
     // file path
 
@@ -1095,11 +1053,8 @@ HANDLE OrganizerCore::startApplication(const QString &executable, const QStringL
     try {
       const Executable &exe = m_ExecutablesList.findByBinary(binary);
       steamAppID = exe.m_SteamAppID;
-      if (exe.canLaunchGame()) {
-        login = Login::Required;
-      }
     } catch (const std::runtime_error&) {
-      qWarning("\"%s\" not set up as executable", executable.toUtf8().constData());
+      // nop
     }
   } else {
     // only a file name, search executables list
@@ -1113,16 +1068,13 @@ HANDLE OrganizerCore::startApplication(const QString &executable, const QStringL
       if (cwd.length() == 0) {
         currentDirectory = exe.m_WorkingDirectory;
       }
-      if (exe.canLaunchGame()) {
-        login = Login::Required;
-      }
     } catch (const std::runtime_error&) {
       qWarning("\"%s\" not set up as executable", executable.toUtf8().constData());
       binary = QFileInfo(executable);
     }
   }
 
-  return spawnBinaryDirect(binary, arguments, profileName, currentDirectory, steamAppID, login);
+  return spawnBinaryDirect(binary, arguments, profileName, currentDirectory, steamAppID);
 }
 
 bool OrganizerCore::waitForApplication(HANDLE handle, LPDWORD exitCode)
