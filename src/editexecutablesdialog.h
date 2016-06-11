@@ -20,10 +20,14 @@ along with Mod Organizer.  If not, see <http://www.gnu.org/licenses/>.
 #ifndef EDITEXECUTABLESDIALOG_H
 #define EDITEXECUTABLESDIALOG_H
 
-#include "tutorabledialog.h"
-#include <QListWidgetItem>
-#include <QTimer>
 #include "executableslist.h"
+#include "tutorabledialog.h"
+
+class QListWidgetItem;
+
+#include <QObject>
+#include <QString>
+
 
 namespace Ui {
     class EditExecutablesDialog;

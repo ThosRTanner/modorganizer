@@ -1005,8 +1005,8 @@ void MainWindow::startExeAction()
           selectedExecutable.m_Arguments,
           selectedExecutable.m_WorkingDirectory.length() != 0 ? selectedExecutable.m_WorkingDirectory
                                                               : selectedExecutable.m_BinaryInfo.absolutePath(),
-          selectedExecutable.m_CloseMO == ExecutableInfo::CloseMOStyle::DEFAULT_CLOSE,
-          selectedExecutable.m_SteamAppID);
+          selectedExecutable.m_SteamAppID,
+          selectedExecutable.canLaunchGame() ? OrganizerCore::Login::Required : OrganizerCore::Login::Not_Required);
   } else {
     qCritical("not an action?");
   }
@@ -1685,8 +1685,8 @@ void MainWindow::on_startButton_clicked()
         selectedExecutable.m_Arguments,
         selectedExecutable.m_WorkingDirectory.length() != 0 ? selectedExecutable.m_WorkingDirectory
                                                             : selectedExecutable.m_BinaryInfo.absolutePath(),
-        selectedExecutable.m_CloseMO == ExecutableInfo::CloseMOStyle::DEFAULT_CLOSE,
-        selectedExecutable.m_SteamAppID);
+        selectedExecutable.m_SteamAppID,
+        selectedExecutable.canLaunchGame() ? OrganizerCore::Login::Required : OrganizerCore::Login::Not_Required);
 }
 
 
@@ -3584,7 +3584,6 @@ void MainWindow::addAsExecutable()
                                                            binaryInfo.absoluteFilePath(),
                                                            arguments,
                                                            targetInfo.absolutePath(),
-                                                           ExecutableInfo::CloseMOStyle::DEFAULT_STAY,
                                                            QString(),
                                                            Executable::CustomExecutable);
           refreshExecutablesList();
@@ -3713,7 +3712,10 @@ void MainWindow::openDataFile()
     QString arguments;
     switch (getBinaryExecuteInfo(targetInfo, binaryInfo, arguments)) {
       case 1: {
-        m_OrganizerCore.spawnBinaryDirect(binaryInfo, arguments, m_OrganizerCore.currentProfile()->name(), targetInfo.absolutePath(), "");
+        //This arguably is wrong if opening an ESP (say) launches the construction set.
+        //Seems overkill for other file types though. Might need tweaking.
+        m_OrganizerCore.spawnBinaryDirect(binaryInfo, arguments, m_OrganizerCore.currentProfile()->name(),
+                                          targetInfo.absolutePath(), "", OrganizerCore::Login::Not_Required);
       } break;
       case 2: {
         ::ShellExecuteW(nullptr, L"open", ToWString(targetInfo.absoluteFilePath()).c_str(), nullptr, nullptr, SW_SHOWNORMAL);

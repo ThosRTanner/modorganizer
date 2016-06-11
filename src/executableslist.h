@@ -20,12 +20,12 @@ along with Mod Organizer.  If not, see <http://www.gnu.org/licenses/>.
 #ifndef EXECUTABLESLIST_H
 #define EXECUTABLESLIST_H
 
-#include "executableinfo.h"
-
-#include <vector>
-
+#include <QFlags>            // for QFlags, Q_DECLARE_FLAGS, etc
 #include <QFileInfo>
-#include <QMetaType>
+#include <QString>           // for QString
+
+#include <stddef.h>          // for size_t
+#include <vector>
 
 namespace MOBase { class IPluginGame; }
 
@@ -36,14 +36,14 @@ struct Executable {
   QString m_Title;
   QFileInfo m_BinaryInfo;
   QString m_Arguments;
-  MOBase::ExecutableInfo::CloseMOStyle m_CloseMO;
   QString m_SteamAppID;
   QString m_WorkingDirectory;
 
   enum Flag {
-    CustomExecutable = 0x01,
-    ShowInToolbar = 0x02,
-    UseApplicationIcon = 0x04,
+    CustomExecutable = 1 << 0,
+    ShowInToolbar = 1 << 1,
+    UseApplicationIcon = 1 << 2,
+    CanLaunchGame = 1 << 3,
 
     AllFlags = 0xff //I know, I know
   };
@@ -59,8 +59,11 @@ struct Executable {
   void showOnToolbar(bool state);
 
   bool usesOwnIcon() const { return  m_Flags.testFlag(UseApplicationIcon); }
+
+  bool canLaunchGame() const { return m_Flags.testFlag(CanLaunchGame); }
 };
 
+Q_DECLARE_OPERATORS_FOR_FLAGS(Executable::Flags)
 
 /*!
  * @brief List of executables configured to by started from MO
@@ -105,7 +108,7 @@ public:
    * @return the executable
    * @exception runtime_error will throw an exception if the name is not correct
    */
-  Executable &findByBinary(const QFileInfo &info);
+  Executable const &findByBinary(const QFileInfo &info) const;
 
   /**
    * @brief determine if an executable exists
@@ -126,32 +129,28 @@ public:
    * @param title name displayed in the UI
    * @param executableName the actual filename to execute
    * @param arguments arguments to pass to the executable
-   * @param closeMO if true, MO will be closed when the binary is started
    **/
   void addExecutable(const QString &title,
                      const QString &executableName,
                      const QString &arguments,
                      const QString &workingDirectory,
-                     MOBase::ExecutableInfo::CloseMOStyle closeMO,
                      const QString &steamAppID,
                      Executable::Flags flags)
   {
-    updateExecutable(title, executableName, arguments, workingDirectory, closeMO, steamAppID, Executable::AllFlags, flags);
+    updateExecutable(title, executableName, arguments, workingDirectory, steamAppID, Executable::AllFlags, flags);
   }
 
   /**
-   * @brief Update an executable to the list
+   * @brief Update an executable in the list
    *
    * @param title name displayed in the UI
    * @param executableName the actual filename to execute
    * @param arguments arguments to pass to the executable
-   * @param closeMO if true, MO will be closed when the binary is started
    **/
   void updateExecutable(const QString &title,
                         const QString &executableName,
                         const QString &arguments,
                         const QString &workingDirectory,
-                        MOBase::ExecutableInfo::CloseMOStyle closeMO,
                         const QString &steamAppID,
                         Executable::Flags mask,
                         Executable::Flags flags);
@@ -191,16 +190,8 @@ private:
 
   std::vector<Executable>::iterator findExe(const QString &title);
 
-  void addExecutableInternal(const QString &title, const QString &executableName, const QString &arguments,
-                             const QString &workingDirectory, MOBase::ExecutableInfo::CloseMOStyle closeMO,
-                             const QString &steamAppID);
-
-private:
-
   std::vector<Executable> m_Executables;
 
 };
-
-Q_DECLARE_OPERATORS_FOR_FLAGS(Executable::Flags)
 
 #endif // EXECUTABLESLIST_H

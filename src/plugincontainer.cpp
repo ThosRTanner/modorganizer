@@ -1,4 +1,6 @@
 #include "plugincontainer.h"
+
+#include "iuserinterface.h"
 #include "organizerproxy.h"
 #include "report.h"
 #include <ipluginproxy.h>

@@ -165,22 +165,19 @@ Right now the only case I know of where this needs to be overwritten is for the 
     </layout>
    </item>
    <item>
-    <widget class="QCheckBox" name="closeCheckBox">
-     <property name="toolTip">
-      <string>If checked, MO will be closed once the specified executable is run.</string>
-     </property>
-     <property name="whatsThis">
-      <string>If checked, MO will be closed once the specified executable is run.</string>
-     </property>
+    <widget class="QCheckBox" name="useAppIconCheckBox">
      <property name="text">
-      <string>Close MO when started</string>
+      <string>Use Application's Icon for shortcuts</string>
      </property>
     </widget>
    </item>
    <item>
-    <widget class="QCheckBox" name="useAppIconCheckBox">
+    <widget class="QCheckBox" name="canLaunchGameCheckBox">
+     <property name="toolTip">
+      <string>If this is checked, the application can launch the game and any pre-game checks will be run when this application is started</string>
+     </property>
      <property name="text">
-      <string>Use Application's Icon for shortcuts</string>
+      <string>Can Launch Game</string>
      </property>
     </widget>
    </item>
@@ -247,10 +244,6 @@ Right now the only case I know of where this needs to be overwritten is for the 
     </layout>
    </item>
   </layout>
-  <zorder>executablesListBox</zorder>
-  <zorder>closeButton</zorder>
-  <zorder>closeCheckBox</zorder>
-  <zorder>useAppIconCheckBox</zorder>
  </widget>
  <resources/>
  <connections/>

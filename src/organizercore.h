@@ -3,7 +3,6 @@
 
 
 #include "selfupdater.h"
-#include "iuserinterface.h" //should be class IUserInterface;
 #include "settings.h"
 #include "modlist.h"
 #include "modinfo.h"
@@ -16,6 +15,7 @@
 #include <iplugindiagnose.h>
 #include <versioninfo.h>
 #include <delayedfilewriter.h>
+
 #include <boost/signals2.hpp>
 
 class ModListSortProxy;
@@ -31,17 +31,24 @@ namespace MOShared { class DirectoryEntry; }
 #include <QString>
 #include <QStringList>
 #include <QThread>
+#include <QVariant>
 
+class QFileInfo;
 class QNetworkReply;
 class QUrl;
 class QWidget;
 
+#include <Windows.h>
+
 #include <functional>
 #include <vector>
 
+class IUserInterface;
 class PluginContainer;
 
 namespace MOBase {
+  class IModInterface;
+  class IModRepositoryBridge;
   class IPluginGame;
 }
 
@@ -127,8 +134,9 @@ public:
 
   void doAfterLogin(const std::function<void()> &function) { m_PostLoginTasks.append(function); }
 
-  void spawnBinary(const QFileInfo &binary, const QString &arguments = "", const QDir &currentDirectory = QDir(), bool closeAfterStart = true, const QString &steamAppID = "");
-  HANDLE spawnBinaryDirect(const QFileInfo &binary, const QString &arguments, const QString &profileName, const QDir &currentDirectory, const QString &steamAppID);
+  enum class Login { Not_Required, Required };
+  void spawnBinary(const QFileInfo &binary, const QString &arguments, const QDir &currentDirectory, const QString &steamAppID, Login login);
+  HANDLE spawnBinaryDirect(const QFileInfo &binary, const QString &arguments, const QString &profileName, const QDir &currentDirectory, const QString &steamAppID, Login login);
 
   void loginSuccessfulUpdate(bool necessary);
   void loginFailedUpdate(const QString &message);
@@ -136,6 +144,8 @@ public:
   void createDefaultProfile();
 
   MOBase::DelayedFileWriter &pluginsWriter() { return m_PluginListsWriter; }
+
+  Executable const &findExecutableFromBinary(const QString &app) const;
 
 public:
   MOBase::IModRepositoryBridge *createNexusBridge() const;
@@ -168,8 +178,6 @@ public:
   bool onFinishedRun(const std::function<void (const QString &, unsigned int)> &func);
   void refreshModList(bool saveChanges = true);
   QStringList modsSortedByProfilePriority() const;
-
-  //std::vector<std::pair<QString, QString> > fileMapping();
 
 public: // IPluginDiagnose interface
 
@@ -221,12 +229,6 @@ private:
   void updateModActiveState(int index, bool active);
 
   bool testForSteam();
-
-  /*
-   * std::vector<std::pair<QString, QString>> fileMapping(const QString &dataPath,
-                                                       const MOShared::DirectoryEntry *base,
-                                                       const MOShared::DirectoryEntry *directoryEntry);
-*/
 
 private slots:
 

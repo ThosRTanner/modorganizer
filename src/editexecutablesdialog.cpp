@@ -19,15 +19,36 @@ along with Mod Organizer.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "editexecutablesdialog.h"
 #include "ui_editexecutablesdialog.h"
-#include "filedialogmemory.h"
-#include "stackdata.h"
-#include <QMessageBox>
-#include <Shellapi.h>
-#include <utility.h>
+
+#include "filedialogmemory.h"          // for FileDialogMemory
+#include "utility.h"                   // for ToQString, ToWString
+
+#include <QCheckBox>                   // for QCheckBox
+#include <QColor>                      // for QColor
+#include <QDir>                        // for QDir
+#include <QFileInfo>                   // for QFileInfo
+#include <QFlags>                      // for operator|, QFlags
+#include <QItemSelectionModel>         // for QItemSelectionModel, etc
+#include <QLineEdit>                   // for QLineEdit
+#include <QList>                       // for QList
+#include <QListWidget>                 // for QListWidget
+#include <QListWidgetItem>             // for QListWidgetItem
+#include <QMessageBox>                 // for QMessageBox, etc
+#include <QModelIndex>                 // for QModelIndex
+#include <QPushButton>                 // for QPushButton
+#include <QSettings>                   // for QSettings, etc
+#include <QTimer>                      // for QTimer
+#include <QVariant>                    // for QVariant
+#include <Qt>
+#include <QtDebug>                     // for qDebug
+
+#include <string>                      // for wstring
+#include <vector>                      // for _Vector_const_iterator, etc
+
+#include <shellapi.h>                  // for FindExecutableW, etc
 
 
 using namespace MOBase;
-using namespace MOShared;
 
 EditExecutablesDialog::EditExecutablesDialog(const ExecutablesList &executablesList, QWidget *parent)
   : TutorableDialog("EditExecutables", parent)
@@ -85,28 +106,35 @@ void EditExecutablesDialog::resetInput()
   ui->argumentsEdit->setText("");
   ui->appIDOverwriteEdit->clear();
   ui->overwriteAppIDBox->setChecked(false);
-  ui->closeCheckBox->setChecked(false);
   ui->useAppIconCheckBox->setChecked(false);
+  ui->canLaunchGameCheckBox->setChecked(false);
   m_CurrentItem = nullptr;
 }
 
 
 void EditExecutablesDialog::saveExecutable()
 {
+  Executable::Flags mask(Executable::AllFlags);
+  mask &= ~Executable::ShowInToolbar;
+
+  Executable::Flags flags(Executable::CustomExecutable);
+  if (ui->useAppIconCheckBox->isChecked()) {
+    //FIXME Should not make this custom if this is the only change.
+    flags |= Executable::UseApplicationIcon;
+  }
+  if (ui->canLaunchGameCheckBox->isChecked()) {
+    flags |= Executable::CanLaunchGame;
+  }
+
   m_ExecutablesList.updateExecutable(ui->titleEdit->text(),
                                      QDir::fromNativeSeparators(ui->binaryEdit->text()),
                                      ui->argumentsEdit->text(),
                                      QDir::fromNativeSeparators(ui->workingDirEdit->text()),
-                                     (ui->closeCheckBox->checkState() == Qt::Checked) ?
-                                       ExecutableInfo::CloseMOStyle::DEFAULT_CLOSE
-                                     : ExecutableInfo::CloseMOStyle::DEFAULT_STAY,
                                      ui->overwriteAppIDBox->isChecked() ?
                                        ui->appIDOverwriteEdit->text() : "",
-                                     Executable::UseApplicationIcon | Executable::CustomExecutable,
-                                     (ui->useAppIconCheckBox->isChecked() ?
-                                       Executable::UseApplicationIcon : Executable::Flags())
-                                     | Executable::CustomExecutable);
-  }
+                                     mask,
+                                     flags);
+}
 
 
 void EditExecutablesDialog::delayedRefresh()
@@ -218,8 +246,8 @@ bool EditExecutablesDialog::executableChanged()
         || selectedExecutable.m_SteamAppID != ui->appIDOverwriteEdit->text()
         || selectedExecutable.m_WorkingDirectory != QDir::fromNativeSeparators(ui->workingDirEdit->text())
         || selectedExecutable.m_BinaryInfo.absoluteFilePath() != QDir::fromNativeSeparators(ui->binaryEdit->text())
-        || (selectedExecutable.m_CloseMO == ExecutableInfo::CloseMOStyle::DEFAULT_CLOSE) != ui->closeCheckBox->isChecked()
-        || selectedExecutable.usesOwnIcon() != ui->useAppIconCheckBox->isChecked();
+        || selectedExecutable.usesOwnIcon() != ui->useAppIconCheckBox->isChecked()
+        || selectedExecutable.canLaunchGame() != ui->canLaunchGameCheckBox->isChecked();
   } else {
     QFileInfo fileInfo(ui->binaryEdit->text());
     return !ui->binaryEdit->text().isEmpty()
@@ -291,14 +319,6 @@ void EditExecutablesDialog::on_executablesListBox_clicked(const QModelIndex &cur
     ui->binaryEdit->setText(QDir::toNativeSeparators(selectedExecutable.m_BinaryInfo.absoluteFilePath()));
     ui->argumentsEdit->setText(selectedExecutable.m_Arguments);
     ui->workingDirEdit->setText(QDir::toNativeSeparators(selectedExecutable.m_WorkingDirectory));
-    ui->closeCheckBox->setChecked(selectedExecutable.m_CloseMO == ExecutableInfo::CloseMOStyle::DEFAULT_CLOSE);
-    if (selectedExecutable.m_CloseMO == ExecutableInfo::CloseMOStyle::NEVER_CLOSE) {
-      ui->closeCheckBox->setEnabled(false);
-      ui->closeCheckBox->setToolTip(tr("MO must be kept running or this application will not work correctly."));
-    } else {
-      ui->closeCheckBox->setEnabled(true);
-      ui->closeCheckBox->setToolTip(tr("If checked, MO will be closed once the specified executable is run."));
-    }
     ui->removeButton->setEnabled(selectedExecutable.isCustom());
     ui->overwriteAppIDBox->setChecked(!selectedExecutable.m_SteamAppID.isEmpty());
     if (!selectedExecutable.m_SteamAppID.isEmpty()) {
@@ -307,5 +327,6 @@ void EditExecutablesDialog::on_executablesListBox_clicked(const QModelIndex &cur
       ui->appIDOverwriteEdit->clear();
     }
     ui->useAppIconCheckBox->setChecked(selectedExecutable.usesOwnIcon());
+    ui->canLaunchGameCheckBox->setChecked(selectedExecutable.canLaunchGame());
   }
 }

@@ -19,14 +19,17 @@ along with Mod Organizer.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "executableslist.h"
 
+#include "executableinfo.h"  // for ExecutableInfo
 #include "iplugingame.h"
-#include "utility.h"
 
+#include <QByteArray>     // for QByteArray
 #include <QFileInfo>
 #include <QDir>
-#include <QDebug>
+#include <QStringList>    // for QStringList
+#include <QtGlobal>       // for Q_ASSERT
 
 #include <algorithm>
+#include <stdexcept>      // for runtime_error
 
 
 using namespace MOBase;
@@ -46,12 +49,17 @@ void ExecutablesList::init(IPluginGame const *game)
   m_Executables.clear();
   for (const ExecutableInfo &info : game->executables()) {
     if (info.isValid()) {
-      addExecutableInternal(info.title(),
-                            info.binary().absoluteFilePath(),
-                            info.arguments().join(" "),
-                            info.workingDirectory().absolutePath(),
-                            info.closeMO(),
-                            info.steamAppID());
+      Executable newExe;
+      newExe.m_BinaryInfo = info.binary();
+      newExe.m_Title = info.title();
+      newExe.m_Arguments = info.arguments().join(" ");
+      newExe.m_WorkingDirectory = info.workingDirectory().absolutePath();
+      newExe.m_SteamAppID = info.steamAppID();
+      newExe.m_Flags = 0;
+      if (info.canLaunchGame()) {
+        newExe.m_Flags |= Executable::CanLaunchGame;
+      }
+      m_Executables.push_back(newExe);
     }
   }
 }
@@ -91,9 +99,9 @@ Executable &ExecutablesList::find(const QString &title)
 }
 
 
-Executable &ExecutablesList::findByBinary(const QFileInfo &info)
+const Executable &ExecutablesList::findByBinary(const QFileInfo &info) const
 {
-  for (Executable &exe : m_Executables) {
+  for (Executable const &exe : m_Executables) {
     if (info == exe.m_BinaryInfo) {
       return exe;
     }
@@ -135,7 +143,6 @@ void ExecutablesList::updateExecutable(const QString &title,
                                        const QString &executableName,
                                        const QString &arguments,
                                        const QString &workingDirectory,
-                                       ExecutableInfo::CloseMOStyle closeMO,
                                        const QString &steamAppID,
                                        Executable::Flags mask,
                                        Executable::Flags flags)
@@ -146,7 +153,6 @@ void ExecutablesList::updateExecutable(const QString &title,
 
   if (existingExe != m_Executables.end()) {
     existingExe->m_Title = title;
-    existingExe->m_CloseMO = closeMO;
     existingExe->m_Flags &= ~mask;
     existingExe->m_Flags |= flags;
     // for pre-configured executables don't overwrite settings we didn't store
@@ -162,7 +168,6 @@ void ExecutablesList::updateExecutable(const QString &title,
   } else {
     Executable newExe;
     newExe.m_Title = title;
-    newExe.m_CloseMO = closeMO;
     newExe.m_BinaryInfo = file;
     newExe.m_Arguments = arguments;
     newExe.m_WorkingDirectory = workingDirectory;
@@ -180,25 +185,6 @@ void ExecutablesList::remove(const QString &title)
       m_Executables.erase(iter);
       break;
     }
-  }
-}
-
-
-void ExecutablesList::addExecutableInternal(const QString &title, const QString &executableName,
-                                            const QString &arguments, const QString &workingDirectory,
-                                            ExecutableInfo::CloseMOStyle closeMO, const QString &steamAppID)
-{
-  QFileInfo file(executableName);
-  if (file.exists()) {
-    Executable newExe;
-    newExe.m_CloseMO = closeMO;
-    newExe.m_BinaryInfo = file;
-    newExe.m_Title = title;
-    newExe.m_Arguments = arguments;
-    newExe.m_WorkingDirectory = workingDirectory;
-    newExe.m_SteamAppID = steamAppID;
-    newExe.m_Flags = 0;
-    m_Executables.push_back(newExe);
   }
 }
 
